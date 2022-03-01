@@ -1,0 +1,55 @@
+#!/usr/bin/env python3
+
+import json
+import sys
+import secrets
+
+
+def problem_1(inputs):
+    tmp=[]
+    for item in inputs:
+       tmp.append(str(item).upper())
+    # print(tmp)
+    return tmp
+
+def problem_2(inputs):
+    tmp = []
+    for item in inputs:
+        tmp.append(str(bytes.fromhex(item),encoding='ascii'))
+    # print(tmp)
+    return tmp
+def problem_3(inputs):
+    tmp = []
+    for item in inputs:
+        item=bytearray.fromhex(item)
+        i=0
+        tmp_1=[]
+        for bit in item:
+            tmp_1.append(hex((bit+32+i)%256))
+            i=i+1
+        tmp.append(''.join(tmp_1).replace('0x','').upper())
+    # print(tmp)
+    return tmp
+
+def problem_4(inputs):
+    tmp=[]
+    for item in inputs:
+        tmp.append(secrets.randbelow(item))
+    # print(tmp)
+    return tmp
+
+if __name__ == "__main__":
+    in_data=json.load(sys.stdin)
+    # out_data=in_data.copy()
+    out_data={}
+    for key in in_data:
+        if key.lower()=="problem 1":
+            out_data[key]=problem_1(in_data[key])
+        elif key.lower()=="problem 2":
+            out_data[key] = problem_2(in_data[key])
+        elif key.lower()=="problem 3":
+            out_data[key] = problem_3(in_data[key])
+        elif key.lower()=="problem 4":
+            out_data[key] = problem_4(in_data[key])
+
+    json.dump(out_data,sys.stdout)

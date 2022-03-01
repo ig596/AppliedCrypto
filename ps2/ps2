@@ -1,0 +1,104 @@
+#!/usr/bin/env python3
+import json
+import sys
+import secrets
+from Crypto.Cipher import AES
+from Crypto.Util import Counter
+from binascii import hexlify as hexa
+from os import urandom
+from struct import unpack
+from Crypto.Cipher import AES
+def parse_trades(trade_hex_bytestring_pt, trade_hex_bytestring_ct):
+    trades= {}
+    for i in range(0, len(bytes.fromhex(trade_hex_bytestring_ct))-1, +16):
+        trade= {"ciphertext": bytes.fromhex(trade_hex_bytestring_ct)[i + 0:i + 16], "plaintext_command":chr(bytes.fromhex(trade_hex_bytestring_pt)[i + 0]), "plaintext_ticker":str(bytes.fromhex(trade_hex_bytestring_pt)[i + 2:i + 6], encoding='ascii'), "plaintext_amount":int(bytes.fromhex(trade_hex_bytestring_pt)[i + 8:i + 15])}
+
+        trades[bytes.fromhex(trade_hex_bytestring_ct)[i + 0:i + 16].hex()]=trade
+    return trades
+def get_max_trade(trades,co,op):
+    max_trade=None
+    max_trade_value=0
+    for trade in trades.values():
+        if trade['plaintext_command']==op and trade['plaintext_ticker']==co and trade['plaintext_amount']>max_trade_value:
+            max_trade_value=trade['plaintext_amount']
+            max_trade=trade
+    return(max_trade)
+
+def problem_1_alt(in_json):
+    return None
+
+def problem_1(in_json):
+    out_array=[]
+    converted_json=in_json.copy()
+    converted_json['old_pt']=str(bytes.fromhex(in_json['old_pt']),encoding='ascii')
+    # print(converted_json['old_pt'])
+    # print(in_json['old_ct'])
+    # converted_json['old_ct'] = bytes.fromhex(in_json['old_ct'])
+    # print(in_json['old_pt'])
+    old_trades=parse_trades(in_json['old_pt'],in_json['old_ct'])
+    # print(old_trades)
+    new_trades=[]
+    for trade in in_json['new_trades']:
+        trade=bytes.fromhex(trade)
+        tmp_trades = bytes().hex()
+        for j in range(0, len(trade)-1,16):
+            # print("trade=" + str(trade[j + 0:j + 16].hex()))
+            if trade[j + 0:j + 16].hex() in old_trades.keys():
+                # print("trade found")
+                matching_trade=old_trades[trade[j + 0:j + 16].hex()]
+                if matching_trade['plaintext_command']==in_json['op_1'] and matching_trade['plaintext_ticker']==in_json['co_1']:
+                    max_trade=get_max_trade(old_trades,in_json['co_2'],in_json['op_2'])
+                    tmp_trades=tmp_trades+max_trade['ciphertext'].hex()
+                else:
+                    tmp_trades=tmp_trades+matching_trade['ciphertext'].hex()
+
+            else:
+               tmp_trades=tmp_trades+trade[j + 0:j + 16].hex()
+        new_trades.append(tmp_trades)
+    # print(new_trades)
+    return new_trades
+
+def problem_2(in_dict):
+    # # pick a starting value for the counter
+    key=secrets.token_bytes(16)
+    # print(key)
+    # ctx = AES.new(key=key, mode=AES.MODE_CTR,nonce=b'01234567')
+    # print(ctx.encrypt(bytes.fromhex(in_dict['new_ct'])).hex())
+    key= bytes([pt ^ ct for ct, pt in zip(bytes.fromhex(in_dict['old_ct']), bytes.fromhex(in_dict['old_pt']))])
+    # key=bytes([pt ^ ct for ct, pt in zip(bytes.fromhex(in_dict['old_ct']), bytes.fromhex(in_dict['old_pt']))])
+    # print("key is"+str(key.hex()))
+    # print(bytes([pt ^ key for pt, key in zip(bytes.fromhex(in_dict['old_pt']), key)]).hex())
+    decrypted=bytes([new_ct ^ key for new_ct, key in zip(bytes.fromhex(in_dict['new_ct']), key)])
+    # print("decrypted is "+ str(decrypted.hex( )))
+    return decrypted.hex()
+
+def problem_3(in_dict):
+
+    new_ct=None
+    key=bytes([pt ^ ct for ct, pt in zip(bytes.fromhex(in_dict['todays_ct']), b'1000000000000000')])
+    print(key.hex())
+    decrypt =bytes([ ct^key  for key, ct in zip(key,bytes.fromhex(in_dict['todays_ct']))])
+
+    print(str(decrypt,encoding='ascii'))
+
+    return new_ct
+
+def problem_4(in_dict):
+    return None
+
+if __name__ == "__main__":
+    in_data=json.load(open('example-input.json','rb'))
+    # in_data = json.load(sys.stdin)
+    out_data=in_data.copy()
+    out_data = {}
+    for key in in_data:
+        if key.lower() == "problem 1":
+            out_data[key] = problem_1(in_data[key])
+        elif key.lower() == "problem 2":
+            out_data[key] = problem_2(in_data[key])
+        elif key.lower() == "problem 3":
+            out_data[key] = problem_3(in_data[key])
+        elif key.lower() == "problem 4":
+            out_data[key] = problem_4(in_data[key])
+
+    json.dump(out_data, sys.stdout)
