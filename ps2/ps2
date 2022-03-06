@@ -2,12 +2,9 @@
 import json
 import sys
 import secrets
-from Crypto.Cipher import AES
-from Crypto.Util import Counter
-from binascii import hexlify as hexa
-from os import urandom
-from struct import unpack
-from Crypto.Cipher import AES
+import typing
+
+
 def parse_trades(trade_hex_bytestring_pt, trade_hex_bytestring_ct):
     trades= {}
     for i in range(0, len(bytes.fromhex(trade_hex_bytestring_ct))-1, +16):
@@ -24,10 +21,8 @@ def get_max_trade(trades,co,op):
             max_trade=trade
     return(max_trade)
 
-def problem_1_alt(in_json):
-    return None
 
-def problem_1(in_json):
+def problem_1(in_json: typing.Dict) -> typing.List[str]:
     out_array=[]
     converted_json=in_json.copy()
     converted_json['old_pt']=str(bytes.fromhex(in_json['old_pt']),encoding='ascii')
@@ -58,7 +53,7 @@ def problem_1(in_json):
     # print(new_trades)
     return new_trades
 
-def problem_2(in_dict):
+def problem_2(in_dict: typing.Dict)-> typing.AnyStr:
     # # pick a starting value for the counter
     key=secrets.token_bytes(16)
     # print(key)
@@ -72,23 +67,43 @@ def problem_2(in_dict):
     # print("decrypted is "+ str(decrypted.hex( )))
     return decrypted.hex()
 
-def problem_3(in_dict):
+def problem_3(in_dict: typing.Dict)->typing.AnyStr:
+    tmp_in=bytearray.fromhex(in_dict['todays_ct'])
+    # os =pt2 which is random bytes for keystream
+    # bytes_of_ct=bytes.fromhex(in_dict['todays_ct'])
+    tmp_xor=bytearray(a ^ b for a, b in zip(b'S', b'B'))
+    # print(tmp_xor)
+    for i in range(0, len(tmp_in) - 1, +16):
+        tmp_in[i]=tmp_in[i]^tmp_xor[0]
+    # print(str(tmp_in.hex()))
+    # print(decrypt.hex())
+    return str(tmp_in.hex())
 
-    new_ct=None
-    key=bytes([pt ^ ct for ct, pt in zip(bytes.fromhex(in_dict['todays_ct']), b'1000000000000000')])
-    print(key.hex())
-    decrypt =bytes([ ct^key  for key, ct in zip(key,bytes.fromhex(in_dict['todays_ct']))])
-
-    print(str(decrypt,encoding='ascii'))
-
-    return new_ct
-
-def problem_4(in_dict):
-    return None
+def problem_4(in_dict: typing.Dict)->typing.List[str]:
+    trade_list=in_dict['trade_list']
+    out=[]
+    swap_trade_type=bytes(a ^ b for a, b in zip(b'S', b'B'))
+    for index,trade in enumerate(trade_list):
+        tmp_trade=bytearray.fromhex(trade_list[index])
+        # print("initial trade= "+tmp_trade.hex())
+        tmp_trade[0]=tmp_trade[0]^swap_trade_type[0]
+        expected=str(in_dict['expected_num'][index])
+        tmp_expected=bytes('{:<8}'.format(expected),'utf-8')
+        # print("tmp_expected="+str(tmp_expected))
+        actual=str(in_dict['actual_num'][index])
+        tmp_actual=bytes('{:<8}'.format(actual),'utf-8')
+        # print("tmp_actual=" +tmp_actual.hex())
+        swap_trade_value =bytes(a ^ b for a, b in zip(tmp_actual,tmp_expected))
+        # print("XORED values="+swap_trade_value.hex())
+        tmp_trade[8:] = bytes([a ^ b for a, b in zip(bytes(tmp_trade[8:]),swap_trade_value)])
+        out.append(tmp_trade.hex())
+    # print("output="+str(out))
+    return out
 
 if __name__ == "__main__":
-    in_data=json.load(open('example-input.json','rb'))
-    # in_data = json.load(sys.stdin)
+    # in_data=json.load(open('example-input.json','r'))
+    # in_data=json.load(open('example_in_2.json','rb'))
+    in_data = json.load(sys.stdin)
     out_data=in_data.copy()
     out_data = {}
     for key in in_data:
