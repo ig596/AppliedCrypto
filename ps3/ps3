@@ -1,0 +1,97 @@
+#!/usr/bin/env python3
+
+import math
+import json
+import sys
+
+def is_prime(n):
+    if n <=1:
+        return False
+    for i in range(2, int(math.sqrt(n)) + 1):
+        if n % i == 0:
+            return False
+    return True
+
+def problem_1(in_data):
+    results=[]
+    for num in in_data["nums"]:
+        results.append(is_prime(num))
+    return results
+
+def problem_2(in_data):
+    p=in_data['p']
+    q=in_data['q']
+    lcm=int(((p-1)*(q-1))/math.gcd(p-1,q-1))
+    e=2
+    while e<=p and e<=q:
+        if math.gcd(e,lcm)==1:
+            return int(e)
+        else:
+            e+=1
+
+
+def problem_3(in_data):
+    p = in_data['p']
+    q = in_data['q']
+    lcm=int(((p-1)*(q-1))/math.gcd(p-1,q-1))
+    e=2
+    while e <= p and e <= q:
+        if math.gcd(e, lcm) == 1:
+             break
+        else:
+            e += 1
+    d=2
+    while ((d*e)%lcm)!=1:
+        d+=1
+    return int(d)
+
+
+def problem_4(in_data):
+    n= in_data['n']
+    e=in_data['e']
+    x=in_data['x']
+    return (x**e)%n
+
+def problem_5(in_data):
+    p=in_data['p']
+    q=in_data['q']
+    n=p*q
+    y=in_data['y']
+    e=problem_2(in_data)
+    d=problem_3(in_data)
+    try:
+        tmp1=y**d
+        tmp2=tmp1%n
+        return tmp2
+    except OverflowError as oe:
+        try:
+            d_P = d%( p - 1)
+            d_Q = d%(q - 1)
+            q_inv = (q**-1) % p
+            m_1=(y**d_P)%p
+            m_2=(y**d_Q)%q
+            h=(q_inv*(m_1-m_2))%p
+            m=m_2+(h*q)%n
+            return(m)
+        except OverflowError as oe:
+            return -1
+
+
+if __name__ == "__main__":
+    # in_data=json.load(open('example-input.json','r'))
+    # in_data=json.load(open('example-input2.json','rb'))
+    in_data = json.load(sys.stdin)
+    out_data = {}
+    for key in in_data:
+        if key.lower() == "problem 1":
+            out_data[key] = problem_1(in_data[key])
+        elif key.lower() == "problem 2":
+            out_data[key] = problem_2(in_data[key])
+        elif key.lower() == "problem 3":
+            out_data[key] = problem_3(in_data[key])
+        elif key.lower() == "problem 4":
+            out_data[key] = problem_4(in_data[key])
+        elif key.lower() == "problem 5":
+            out_data[key] = problem_5(in_data[key])
+
+    json.dump(out_data, sys.stdout)
