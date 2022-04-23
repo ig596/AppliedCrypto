@@ -1,0 +1,103 @@
+#!/usr/bin/env python3
+
+
+import binascii
+import functools
+import getpass
+import hashlib
+import hmac
+import json
+import secrets
+import sys
+import typing
+
+import Crypto.Cipher.AES
+import Crypto.Util.Counter
+import Crypto.Util.Padding
+
+
+
+def xor(*args: bytes) -> bytes:
+    return bytes(functools.reduce(lambda a, b: a ^ b, i) for i in zip(*args))
+def xor_bytes(bl, b2):
+    return bytes([x ^ y for x, y in zip(bl, b2)])
+
+
+def get_password():
+    password = getpass.getpass("")
+    return password
+
+
+def generate_master_key(password: typing.ByteString, salt: typing.ByteString==secrets.token_bytes(16)) -> typing.ByteString:
+    # print(binascii.hexlify(salt))
+    source_key = hashlib.pbkdf2_hmac(hash_name='sha256', password=password, salt=binascii.unhexlify(salt),
+                                     iterations=250000, dklen=32)
+    return binascii.hexlify(source_key).decode('utf-8')
+
+
+def generate_keys(source_key) -> typing.Dict:
+    converted_source_key = binascii.unhexlify(source_key)
+    master_key = converted_source_key[0:16]
+    starting_ctr = converted_source_key[16:32]
+    keys = {}
+    ctr = Crypto.Util.Counter.new(nbits=(8 * 16), initial_value=int.from_bytes(starting_ctr, byteorder='big'))
+    context = Crypto.Cipher.AES.new(key=master_key, mode=Crypto.Cipher.AES.MODE_CTR, counter=ctr)
+    keys['validator'] = context.encrypt(plaintext=b'\x00' * 16).hex()
+    keys['feistel'] = [context.encrypt(plaintext=b'\x00' * 16).hex() for i in range(1, 5)]
+    keys['mac'] = context.encrypt(plaintext=b'\x00' * 16).hex()
+    keys['search_terms'] = context.encrypt(plaintext=b'\x00' * 16).hex()
+    return keys
+
+
+def aes_ctr_round(key, data):
+    left = binascii.unhexlify(data)[:16]
+    right = binascii.unhexlify(data)[16:]
+    # print(right)
+    # print(binascii.hexlify(left))
+    length = 32
+    # keystream=
+    # padded_keystream = Crypto.Util.Padding.pad(binascii.unhexlify(key), block_size=len(right))
+    # ctr = Crypto.Util.Counter.new(nbits=(8 * 16), initial_value=int.from_bytes(left, byteorder='big'))
+    context = Crypto.Cipher.AES.new(binascii.unhexlify(key), mode=Crypto.Cipher.AES.MODE_CTR, initial_value=left,nonce=b'')
+    keystream = context.encrypt( b'\x00'*len(data))
+    # print(keystream.hex())
+
+
+    return (left.hex()+xor(keystream,right).hex())
+    # return (keystream.hex())
+
+def hmac_round(left, right ,key):
+    mac=hmac.new(key=key,msg=right,digestmod='sha256')
+    return xor_bytes(left,mac)
+
+def base_file_checks(file):
+    return None
+
+def parse_text_for_search_words(text):
+    return None
+
+def create_metadata(path, file_name, salt, validator, mac, terms):
+    with open(f'{path}/.fenc-metadata.{file_name}', 'wb') as metadata_file:
+        metadata = {"salt": salt, "validator": validator, "mac": mac, "terms": terms}
+        metadata_file = json.dump(metadata)
+
+
+
+
+if __name__ == "__main__":
+    in_data=json.load(open('example-input.json','r'))
+    # in_data=json.load(open('example-input2.json','rb'))
+    # in_data = json.load(sys.stdin)
+    out_data = {}
+    for key in in_data:
+        if key.lower() == "problem 1":
+            out_data[key] =generate_master_key( bytes(in_data[key]['password'], encoding="utf8"),in_data[key]['salt'])
+        elif key.lower() == "problem 2":
+            out_data[key] = generate_keys(in_data[key])
+        elif key.lower() == "problem 3":
+            out_data[key] = aes_ctr_round(in_data[key]['key'],in_data[key]['data'])
+        elif key.lower() == "problem 4":
+            out_data[key] = ""
+        elif key.lower() == "problem 5":
+            out_data[key] = ""
+    json.dump(out_data, sys.stdout)
