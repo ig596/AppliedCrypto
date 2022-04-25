@@ -10,15 +10,17 @@ import json
 import secrets
 import sys
 import typing
-
+import regex as re
 import Crypto.Cipher.AES
 import Crypto.Util.Counter
 import Crypto.Util.Padding
-
+import unicodedata
 
 
 def xor(*args: bytes) -> bytes:
     return bytes(functools.reduce(lambda a, b: a ^ b, i) for i in zip(*args))
+
+
 def xor_bytes(bl, b2):
     return bytes([x ^ y for x, y in zip(bl, b2)])
 
@@ -28,8 +30,8 @@ def get_password():
     return password
 
 
-def generate_master_key(password: typing.ByteString, salt: typing.ByteString==secrets.token_bytes(16)) -> typing.ByteString:
-    # print(binascii.hexlify(salt))
+def generate_master_key(password: typing.ByteString,
+                        salt: typing.ByteString == secrets.token_bytes(16)) -> typing.ByteString:
     source_key = hashlib.pbkdf2_hmac(hash_name='sha256', password=password, salt=binascii.unhexlify(salt),
                                      iterations=250000, dklen=32)
     return binascii.hexlify(source_key).decode('utf-8')
@@ -52,29 +54,79 @@ def generate_keys(source_key) -> typing.Dict:
 def aes_ctr_round(key, data):
     left = binascii.unhexlify(data)[:16]
     right = binascii.unhexlify(data)[16:]
-    # print(right)
-    # print(binascii.hexlify(left))
-    length = 32
-    # keystream=
-    # padded_keystream = Crypto.Util.Padding.pad(binascii.unhexlify(key), block_size=len(right))
-    # ctr = Crypto.Util.Counter.new(nbits=(8 * 16), initial_value=int.from_bytes(left, byteorder='big'))
-    context = Crypto.Cipher.AES.new(binascii.unhexlify(key), mode=Crypto.Cipher.AES.MODE_CTR, initial_value=left,nonce=b'')
-    keystream = context.encrypt( b'\x00'*len(data))
-    # print(keystream.hex())
+    context = Crypto.Cipher.AES.new(binascii.unhexlify(key), mode=Crypto.Cipher.AES.MODE_CTR, initial_value=left,
+                                    nonce=b'')
+    keystream = context.encrypt(b'\x00' * len(data))
+
+    return (left.hex() + xor(keystream, right).hex())
 
 
-    return (left.hex()+xor(keystream,right).hex())
-    # return (keystream.hex())
+def hmac_round(key, data) -> str:
+    left = binascii.unhexlify(data)[:16]
+    right = binascii.unhexlify(data)[16:]
+    mac = hmac.new(key=binascii.unhexlify(key), msg=right, digestmod='sha256')
+    return (xor_bytes(left, mac.digest()).hex() + right.hex())
 
-def hmac_round(left, right ,key):
-    mac=hmac.new(key=key,msg=right,digestmod='sha256')
-    return xor_bytes(left,mac)
+
+def feistel_all_rounds_encrypt(keys: list, plaintext: str) -> str:
+    round_1 = aes_ctr_round(keys[0], plaintext)
+    round_2 = hmac_round(keys[1], round_1)
+    round_3 = aes_ctr_round(keys[2], round_2)
+    round_4 = hmac_round(keys[3], round_3)
+    return round_4
+
+
+def feistel_all_rounds_decrypt(keys: list, ciphertext: str) -> str:
+    round_1 = hmac_round(keys[3], ciphertext)
+    round_2 = aes_ctr_round(keys[2], round_1)
+    round_3 = hmac_round(keys[1], round_2)
+    round_4 = aes_ctr_round(keys[0], round_3)
+    return round_4
+
 
 def base_file_checks(file):
     return None
 
-def parse_text_for_search_words(text):
-    return None
+
+'''
+You will only collect search terms for files that are properly UTF-8 encoded. We will do a((\p{Lu}|\p{Ll}|\p{lt}|\p{Lo}|\p{lm}|\p{Nd}|\p{Pc}){4,12}) reasonable, but not perfect, job of breaking a UTF-8 string into words. This is the approach taken by many regular expression libraries that will split on words:
+
+    You will treat words as contiguous sequences of Unicode letters (character classes Lu, Ll, Lt, Lm, Lo), non-spacing marks (class Mn), decimel digits (Nd) and connector punctuation (Pc).
+
+    Anything else (Punction, Symbols, Separators, and Other characters) can only separate words, not be part of them.
+
+    You will index all words that have 4-12 codepoints, before casefolding and normalization.
+
+    You will casefold words to lowercase, using the Unicode casefold algorithm.
+
+    After casefolding, you will normalize unicode strings before generating search terms, using the NFC normalization form.
+
+    After normalization, you will create encrypted full-match search terms by MACing them.
+
+    You will also support asterisk matches by MACing all the search terms for each letter length from 4-12 codepoints.
+
+    You will remove duplicates from your encrypted search terms, and will sort them in ascending order, based on the raw binary data.
+'''
+
+def parse_text_for_search_words(text)->list:
+
+    pattern = re.compile(r"(?<![^\W])((\w){4,12})(?![^\W])", flags=re.UNICODE+re.WORD+re.VERSION1)
+    terms=re.findall(pattern,string=text)
+    # print(terms)
+    terms=sorted(list(set([term[0] for term in terms])))
+    # print(terms)
+    return terms
+
+def tokenize_terms(terms:list):
+    # print("tokenizing\n"+str(terms))
+    search_tokens=[]
+    for term in terms:
+        search_tokens.append( unicodedata.normalize('NFC', term).casefold())
+        temp=[unicodedata.normalize('NFC',term[0:i]+'*').casefold() for i in range(4,len(term))]
+        search_tokens=search_tokens+temp
+
+    groomed=sorted(list(set(search_tokens)))
+    return groomed
 
 def create_metadata(path, file_name, salt, validator, mac, terms):
     with open(f'{path}/.fenc-metadata.{file_name}', 'wb') as metadata_file:
@@ -82,22 +134,34 @@ def create_metadata(path, file_name, salt, validator, mac, terms):
         metadata_file = json.dump(metadata)
 
 
-
-
 if __name__ == "__main__":
-    in_data=json.load(open('example-input.json','r'))
-    # in_data=json.load(open('example-input2.json','rb'))
-    # in_data = json.load(sys.stdin)
+    # in_data=json.load(open('example-input.json','r'))
+    in_data = json.load(sys.stdin)
     out_data = {}
     for key in in_data:
         if key.lower() == "problem 1":
-            out_data[key] =generate_master_key( bytes(in_data[key]['password'], encoding="utf8"),in_data[key]['salt'])
+            out_data[key] = generate_master_key(bytes(in_data[key]['password'], encoding="utf8"), in_data[key]['salt'])
         elif key.lower() == "problem 2":
             out_data[key] = generate_keys(in_data[key])
         elif key.lower() == "problem 3":
-            out_data[key] = aes_ctr_round(in_data[key]['key'],in_data[key]['data'])
+            out_data[key] = aes_ctr_round(in_data[key]['key'], in_data[key]['data'])
         elif key.lower() == "problem 4":
-            out_data[key] = ""
+            out_data[key] = hmac_round(in_data[key]['key'], in_data[key]['data'])
         elif key.lower() == "problem 5":
-            out_data[key] = ""
+            out_data[key] = feistel_all_rounds_encrypt(in_data[key]['keys'], in_data[key]['plaintext'])
+        elif key.lower() == "problem 6":
+            out_data[key] = feistel_all_rounds_decrypt(in_data[key]['keys'], in_data[key]['ciphertext'])
+        elif key.lower() == "problem 7":
+            out_data[key] = hmac.new(key=binascii.unhexlify(in_data[key]['key']),
+                                     msg=bytes.fromhex(in_data[key]['data']), digestmod='sha256').digest().hex()
+        elif key.lower() == "problem 8":
+            out_data[key] = parse_text_for_search_words(in_data[key])
+        elif key.lower() == "problem 9":
+            out_data[key] = parse_text_for_search_words(in_data[key])
+        elif key.lower() == "problem 10":
+            out_data[key] = tokenize_terms(parse_text_for_search_words(in_data[key]))
+        elif key.lower() == "problem 11":
+            # print("problem 11")
+            out_data[key] = tokenize_terms(parse_text_for_search_words(in_data[key]))
     json.dump(out_data, sys.stdout)
+
