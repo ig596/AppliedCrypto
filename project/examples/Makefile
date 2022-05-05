@@ -1,4 +1,4 @@
-SHELL=bash
+SHELL=zsh
 
 FENCRYPT?=./fencrypt
 
