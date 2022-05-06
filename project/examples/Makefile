@@ -1,19 +1,19 @@
 SHELL=zsh
 
-FENCRYPT?=./fencrypt
+FENCRYPT?= ../fencrypt
 
 PREFIX=.fenc-meta.
 
 TEXT_FILES=macbeth.txt aeschylus.txt
 BINARY_FILES=ecb.jpg
 
-all: encrypt search
+all: encrypt
 
 encrypt: $(addprefix $(PREFIX),$(TEXT_FILES) $(BINARY_FILES))
 
 $(PREFIX)%: %
-	@echo "encryptiing with password: $(shell echo -n $* | python -c 'import sys; print(repr(sys.stdin.read()))')"
-	echo -n $* | $(FENCRYPT) -e -j $*
+	@echo "encrypting with password: $(shell echo -n $* | python -c 'import sys; print(repr(sys.stdin.read()))')"
+	echo -n $* | $(FENCRYPT) -e --v=2 -j $*
 
 search:
 	@echo
