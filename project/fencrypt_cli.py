@@ -73,7 +73,7 @@ def check_metadata_status(file:pathlib.Path, encrypt:bool):
             logger.debug(metadata.exists())
             if metadata.exists():
                 logger.error("Metadata Exists")
-                exit(errno.EEXIST)
+                status=False
             else:
                 logger.debug("Metadata not found")
                 logger.debug(get_files_in_dir(pathlib.Path.cwd()))
@@ -84,6 +84,10 @@ def check_metadata_status(file:pathlib.Path, encrypt:bool):
     else:
         if (metadata.exists() and metadata.is_file()):
             status = True
+        else:
+            logger.debug(f"Missing Metadata for {file.name}. No files will be decrypted")
+            status=False
+
     return status
 
 def get_password() -> str:
@@ -102,13 +106,15 @@ def get_password() -> str:
     return password
 
 def arg_checks(args):
-
-    # logger.debug(args)
-
+    logger.debug(args)
+    if len(args.files)<1:
+        logger.error("Not Arguments Provided")
+        exit(errno.EINVAL)
     if not args.search and not args.decrypt and not args.encrypt:
         logger.debug("operation not set so will try to encrypt")
         args.encrypt = True
     elif not args.search:
+        pathlib.Path.cwd()
         # logger.debug(get_files_in_dir(pathlib.Path()))
         args.files = [pathlib.Path(file) for file in args.files]
         for file in args.files:
@@ -121,7 +127,12 @@ def arg_checks(args):
                 logger.error("Bad metadata")
                 return sys.exit(errno.EBADF)
         return args
-
+    elif args.search:
+        if len(get_files_in_dir(pathlib.Path.cwd()))<1:
+            logger.error("No files in directory.")
+            exit(errno.ENODATA)
+        else:
+            return args
 
 def arg_setup():
     parser = argparse.ArgumentParser(prog="fencrypt", description='Process some encryption.')
@@ -134,14 +145,13 @@ def arg_setup():
 
     group.add_argument('-e', dest='encrypt', action='store_true', help='enable encryption mode')
 
-    group.add_argument('-s', dest='search', action='store_true')
+    group.add_argument('-s', dest='search', action='store_true', help='enable search mode')
 
-    parser.add_argument('--v', dest='log_level', type=int, default=1)
+    parser.add_argument('--v', dest='log_level', type=int, default=0)
 
     parser.add_argument(dest="files", nargs='+', type=str)
 
     try:
-
         args = parser.parse_args()  # logger.debug(args)
         if args.log_level < 1:
             logger.setLevel(logging.ERROR)

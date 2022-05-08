@@ -64,7 +64,7 @@ def validate_password(password, file_path):
 
         logger.error('Invalid Password')
 
-        sys.exit(13)
+        return False
 
 
     return True
@@ -74,7 +74,7 @@ def generate_master_key(password: typing.ByteString,
 
                         salt: typing.ByteString ) -> bytes:
 
-    logger.debug(f"password={password} , salt={salt}")
+    # logger.debug(f"password={password} , salt={salt}")
 
     if salt is None:
 
@@ -286,28 +286,78 @@ def full_ecrypt_process(password: bytes, file: pathlib.Path,salt,  print_json: b
 
     logger.debug(f"File ending size {file.lstat().st_size}")
 
+def new_decrypt(password: bytes, files:typing.List[pathlib.Path],json_out:bool):
+    any_bad=False
+    validators={}
+    metadata={}
+    possible_files=[]
+    any_bad=False
+    for file in files:
+        metadata[file.name]=fencrypt_cli.get_metadata(file)
+        if not validate_password(password,file):
+            logger.error(f"Password did not match {file.name} No files will be decrypted")
+            any_bad=True
+        else:
+            validators[file.name] = metadata[file.name]['validator']
+            possible_files.append(file)
+    if json_out:
+        json.dump(validators,sys.stdout)
+    if any_bad:
+        exit(errno)
+    for file in possible_files:
+        meta_file = file.with_name(fencrypt_cli.METADATA_FILENAME.format(file_name=file.name))
+        master_key=generate_master_key(password,metadata[file.name]['salt'])
+        feistel_keys=generate_keys(master_key)
+        feistel = [bytes.fromhex(key) for key in feistel_keys['feistel']]
+        mac_key = bytes.fromhex(feistel_keys['mac'])
+        if feistel_keys['mac'] != metadata['mac']:
+            logger.error()
+        encrypted_content = file.read_bytes()
+        new_digest=hmac.new(key=mac_key,msg=encrypted_content,digestmod='sha256').digest()
+        logger.debug(new_digest)
+        logger.debug(mac_key)
+        logger.debug(hmac.compare_digest(new_digest, bytes.fromhex(metadata[file.name]['mac'])))
+
+        if hmac.compare_digest(new_digest, bytes.fromhex(metadata[file.name]['mac'])):
+            decrypted_content = feistel_all_rounds_decrypt(feistel, encrypted_content)
+            file.write_bytes(decrypted_content)
+            meta_file.unlink()
+        else:
+            logger.error(f"HMAC Validation Failed for {file.name}")
 
 
-def full_decyrpt_process(password, file: pathlib.Path):
 
+def full_decyrpt_process(password, file: pathlib.Path, json_out: bool):
+    meta_file = file.with_name(fencrypt_cli.METADATA_FILENAME.format(file_name=file.name))
     metadata = fencrypt_cli.get_metadata(file)
     if password is None:
         password = fencrypt_cli.get_password()
 
     if validate_password(password,file):
         master_key=generate_master_key(password,metadata['salt'])
-        encrypted_content =file.read_bytes()
         feistel_keys=generate_keys(master_key)
         feistel = [bytes.fromhex(key) for key in feistel_keys['feistel']]
-        decrypted_content = feistel_all_rounds_decrypt(feistel, encrypted_content)
+        mac_key = bytes.fromhex(feistel_keys['mac'])
+        encrypted_content = file.read_bytes()
+        new_digest=hmac.new(key=mac_key,msg=encrypted_content,digestmod='sha256').digest()
+        logger.debug(new_digest)
+        logger.debug(mac_key)
+        logger.debug(hmac.compare_digest(new_digest, bytes.fromhex(metadata['mac'])))
+        if hmac.compare_digest(new_digest, bytes.fromhex(metadata['mac'])):
+            decrypted_content = feistel_all_rounds_decrypt(feistel, encrypted_content)
+            file.write_bytes(decrypted_content)
+            meta_file.unlink()
+        else:
+            logger.error("HMAC Validation Failed")
+            print(f"HMAC Failed for {file.name}")
+    else:
+        logger.error("Password Validation Failed")
+        exit(errno.EINVAL)
 
-        file.write_bytes(decrypted_content)
-
-        meta_file=file.with_name(fencrypt_cli.METADATA_FILENAME.format(file_name=file.name))
 
         # meta_file=pathlib.Path(f'.fenc-metadata.{file.name}')
 
-        meta_file.unlink()
+
 
 
 def new_encrypt(password:bytes, files: typing.List[pathlib.Path], json_out:bool):
@@ -347,7 +397,7 @@ def new_encrypt(password:bytes, files: typing.List[pathlib.Path], json_out:bool)
 
         if tokens is not None:
 
-            term_macs = [hmac.new(mac_keys[file.name], token.encode('utf-8'), digestmod='sha256').digest().hex() for token in
+            term_macs = [hmac.new(bytes.fromhex(starting_keys['search_terms']), token.encode('utf-8'), digestmod='sha256').digest().hex() for token in
                          tokens]
         else:
             term_macs = []
@@ -356,31 +406,45 @@ def new_encrypt(password:bytes, files: typing.List[pathlib.Path], json_out:bool)
                                    mac=hmac.new(mac_keys[file.name], encrypted_content, digestmod='sha256').digest().hex())
         file.write_bytes(encrypted_content)
 
-def search(search_bytes:bytes, json_out):
-
+def search(password:bytes, search_str:str, json_out):
     matches=[]
+    validators = {}
+    metadata = {}
+    match_files=[]
+    for file in possible_files:
+        original_file_name=file.name.split('.fenc-meta.')[1]
+        metadata[original_file_name] = json.loads(file.read_text())
+        if not validate_password(password, pathlib.Path(original_file_name)):
+            logger.error(f"Password did not match {original_file_name}.")
+        else:
+            validators[original_file_name] = metadata[original_file_name]['validator']
+            match_files.append(file)
+    if json_out:
+        print(json.dumps(validators))
+    if len(match_files)<1:
+        logger.error("No Matches for Password.")
+        exit(errno.EINVAL)
+    search_token=tokenize_terms(search_str)
+    logger.debug(search_token)
 
-    curr_dir=pathlib.Path.cwd()
+    for file in match_files:
+        original_file_name = file.name.split('.fenc-meta.')[1]
+        master_key = generate_master_key(password, metadata[original_file_name]['salt'])
+        feistel_keys = generate_keys(master_key)
 
-    logger.debug(curr_dir.lstat())
+        maced_search_terms=[]
+        for token in search_token:
+            maced_search_terms.append(hmac.new(key=bytes.fromhex(feistel_keys['search_terms']),msg=token.encode('utf8'),digestmod='sha256').digest().hex())
+        # logger.debug(search_maced)
+        logger.debug(maced_search_terms)
+        file_terms=set(metadata[original_file_name]['terms'])
+        mac_search_set=set(maced_search_terms)
+        if not file_terms.isdisjoint(maced_search_terms):
+            # logger.debug(file_terms.intersection(mac_search_set))
+            print(original_file_name)
+        else:
+            logger.debug("No match")
 
-    for file in curr_dir.iterdir():
-
-        password=fencrypt_cli.get_password()
-
-        validate_password(password,file)
-
-        for term in metadata['terms']:
-
-            if hmac.compare_digest(search_bytes,term):
-
-                if json_out:
-
-                    json.dump(fencrypt_cli.get_metadata(file.name), sys.stdout)
-
-                matches.append(file.name)
-
-    return matches
 
 
 
@@ -484,43 +548,25 @@ def component_test():
 if __name__ == "__main__":
 
     # component_test()
-
-    # full_ecrypt_process("macbeth.txt",pathlib.Path("examples/macbeth.txt"),bytes.fromhex("17b510d821d36428435848e57c81dfc6"),True)
-
-    # exit(0)
-    try:
-        args = fencrypt_cli.arg_setup()
-    except SystemExit:
-        exit(13)
+    args = fencrypt_cli.arg_setup()
     logger.debug("got args")
-    password = bytes(fencrypt_cli.get_password(), "utf8")
+    logger.debug(args)
+
     if args.encrypt:
+        password = bytes(fencrypt_cli.get_password(), "utf8")
         new_encrypt(password,args.files,args.json_out)
         # for file in args.files:
         #         full_ecrypt_process(password, file,None, args.json_out)
-    elif args.decrypt:
+    else:
+        possible_files = sorted(pathlib.Path.cwd().rglob(pattern=".fenc-meta.*"))
+        if len(possible_files) < 1:
+            logger.error("No Encrypted files to search")
+            exit(errno.EINVAL)
+        password = bytes(fencrypt_cli.get_password(), "utf8")
+        if args.decrypt:
+            new_decrypt(password,args.files,args.json_out)
+        if args.search:
+            search(password, args.files, args.json_out)
+        # search_terms=[bytes(token,"utf8") for token in tokenize_terms(args.files)]
 
-        for file in args.files:
-            # metadata = pathlib.Path(f'{file.parent}/.fenc-metadata.{file.name}')
-            metadata=fencrypt_cli.METADATA_FILENAME.format(file_name=file.name)
-            # metadata = file.with_name(fencrypt_cli.METADATA_FILENAME.format(file_name=file.name))
-            metadata=pathlib.Path.cwd().joinpath(metadata)
-            logger.debug(metadata.stat())
 
-            if not metadata.exists() or not metadata.is_file():
-                logger.debug("Metadata missing for file")
-                sys.exit(errno.ENOENT)
-            else:
-
-                full_decyrpt_process(password, file)
-
-    elif args.search:
-
-        search_terms=[bytes(token,"utf8") for token in tokenize_terms(args.files)]
-
-        matches=search(search_terms,args.json_out)
-
-        if len(matches)<1:
-
-            logger.info("No Matches")
-            sys.exit(errno.ENOENT)
