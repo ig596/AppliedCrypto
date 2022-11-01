@@ -1,0 +1,572 @@
+#!/usr/bin/env python3
+
+import binascii
+import errno
+import functools
+import hashlib
+import hmac
+import json
+import os
+import pathlib
+import secrets
+import sys
+import typing
+import unicodedata
+import Crypto.Cipher.AES
+import Crypto.Util.Counter
+import Crypto.Util.Padding
+import regex as re
+import fencrypt_cli
+
+logger = fencrypt_cli.logger
+
+
+
+def xor(*args: bytes) -> bytes:
+
+    return bytes(functools.reduce(lambda a, b: a ^ b, i) for i in zip(*args))
+
+
+
+def xor_bytes(bl, b2):
+
+    return bytes([x ^ y for x, y in zip(bl, b2)])
+
+
+
+def validate_password(password, file_path):
+
+    if password is None:
+
+        password = fencrypt_cli.get_password()
+
+    metadata=fencrypt_cli.get_metadata(file_path)
+
+    converted_master_key=generate_master_key(password,metadata['salt'])
+
+    schedule_key = converted_master_key[0:16]
+
+    schedule_iv = converted_master_key[16:]
+
+    keys = {}
+
+    ctr = Crypto.Util.Counter.new(nbits=8*16, initial_value=int.from_bytes(schedule_iv, byteorder='big'))
+
+    context = Crypto.Cipher.AES.new(key=schedule_key, mode=Crypto.Cipher.AES.MODE_CTR, counter=ctr)
+
+    test_validator = context.encrypt(plaintext=b'\x00' * 16).hex()
+
+    if test_validator==metadata['validator']:
+
+        return True
+
+    else:
+
+        logger.error('Invalid Password')
+
+        return False
+
+
+    return True
+
+
+def generate_master_key(password: typing.ByteString,
+
+                        salt: typing.ByteString ) -> bytes:
+
+    # logger.debug(f"password={password} , salt={salt}")
+
+    if salt is None:
+
+        salt= secrets.token_bytes(16)
+    if type(salt)!=bytes:
+        salt=bytes.fromhex(salt)
+
+    if type(password) != bytes:
+
+        password = bytes(password,"utf8")
+
+    source_key = hashlib.pbkdf2_hmac(hash_name="sha256", password=password, salt=salt,
+
+                                     iterations=250000, dklen=32)
+
+    return source_key
+
+
+
+def generate_keys(schedule_key: bytes) -> typing.Dict:
+
+    # converted_master_key = binascii.unhexlify(schedule_key)
+
+    converted_master_key = schedule_key
+
+    schedule_key = converted_master_key[0:16]
+
+    schedule_iv = converted_master_key[16:]
+
+    keys = {}
+
+    ctr = Crypto.Util.Counter.new(nbits=8*16, initial_value=int.from_bytes(schedule_iv, byteorder='big'))
+
+    context = Crypto.Cipher.AES.new(key=schedule_key, mode=Crypto.Cipher.AES.MODE_CTR, counter=ctr)
+
+    keys['validator'] = context.encrypt(plaintext=b'\x00' * 16).hex()
+
+    keys['feistel'] = [context.encrypt(plaintext=b'\x00' * 16).hex() for i in range(1, 5)]
+
+    keys['mac'] = context.encrypt(plaintext=b'\x00' * 16).hex()
+
+    keys['search_terms'] = context.encrypt(plaintext=b'\x00' * 16).hex()
+
+    return keys
+
+
+
+def aes_ctr_round(key:bytes, data: bytes):
+
+    left = data[:16]
+
+    # logger.debug(left)
+
+    right = data[16:]
+
+    # logger.debug(right)
+
+    ctr = Crypto.Util.Counter.new(nbits=8 * 16, initial_value=int.from_bytes(left, byteorder='big'))
+
+    context = Crypto.Cipher.AES.new(key, mode=Crypto.Cipher.AES.MODE_CTR, counter=ctr)
+
+    # keystream = context.encrypt(b'\x00' * len(data))
+
+    keystream = context.encrypt(b'\x00' * len(data))
+
+    return (left + xor(keystream, right))
+
+
+
+def hmac_round(key:bytes, data:bytes) -> str:
+
+    left = data[:16]
+
+    right = data[16:]
+
+    mac = hmac.new(key=key, msg=right, digestmod="sha256")
+
+    return (xor_bytes(left, mac.digest()) + right)
+
+
+
+def feistel_all_rounds_encrypt(keys: list, plaintext: bytes) -> str:
+
+    # plaintext = plaintext.hex()
+
+    round_1 = aes_ctr_round(keys[0], plaintext)
+
+    round_2 = hmac_round(keys[1], round_1)
+
+    round_3 = aes_ctr_round(keys[2], round_2)
+
+    round_4 = hmac_round(keys[3], round_3)
+
+    return round_4
+
+
+
+def feistel_all_rounds_decrypt(keys:typing.List[bytes], ciphertext: bytes) -> str:
+
+    round_1 = hmac_round(keys[3], ciphertext)
+
+    round_2 = aes_ctr_round(keys[2], round_1)
+
+    round_3 = hmac_round(keys[1], round_2)
+
+    round_4 = aes_ctr_round(keys[0], round_3)
+
+    return round_4
+
+
+
+def parse_text_for_search_words(text) -> list:
+
+    pattern = re.compile(r"(?<![^\W])((\w){4,12})(?![^\W])", flags=re.UNICODE + re.WORD + re.VERSION1)
+
+    terms = re.findall(pattern, string=text)
+
+    terms = list(set([term[0] for term in terms]))
+
+    terms.sort()
+
+    return terms
+
+
+def tokenize_terms(terms: list):
+
+    search_tokens = []
+
+    for term in terms:
+
+        term=term
+
+        search_tokens.append(unicodedata.normalize('NFC', term).casefold())
+
+        temp = [unicodedata.normalize('NFC', term[0:i] + '*').casefold() for i in range(4, len(term))]
+
+        search_tokens = search_tokens + temp
+
+    groomed = sorted(list(set(search_tokens)))
+
+    return groomed
+
+
+
+def full_ecrypt_process(password: bytes, file: pathlib.Path,salt,  print_json: bool):
+
+
+    logger.debug(f"File starting size {file.lstat().st_size}")
+
+    if salt is None:
+
+        salt = secrets.token_bytes(16)
+
+    master_key = generate_master_key(password, salt)
+
+    logger.debug("Generated Master Key")
+
+    feistel_keys = generate_keys(master_key)
+
+    logger.debug(f"Generated Feistel Keys : {feistel_keys}")
+
+    content = file.read_bytes()
+
+    # logger.debug(content.decode('utf8'))
+
+    try:
+
+        search_content = content.decode('utf-8', 'strict')
+
+        terms = parse_text_for_search_words(search_content)
+
+        tokens = tokenize_terms(terms)
+
+    except UnicodeDecodeError as ude:
+
+        terms = None
+
+        tokens = None
+
+    mac_key = bytes.fromhex(feistel_keys['mac'])
+
+    feistel=[bytes.fromhex(key) for key in feistel_keys['feistel']]
+
+    encrypted_content = feistel_all_rounds_encrypt(feistel, content)
+
+    # encrypted_content = bytes.fromhex(encrypted_content)
+
+    if tokens is not None:
+
+        term_macs = [hmac.new(mac_key, token.encode('utf-8'), digestmod='sha256').digest().hex() for token in tokens ]
+
+    else:
+
+        term_macs=[]
+
+    metadata = create_metadata( file=file, salt=salt.hex(), validator=feistel_keys['validator'],
+
+                               terms=term_macs,
+
+                               mac=hmac.new(mac_key, encrypted_content, digestmod='sha256').digest().hex())
+
+    if print_json:
+
+        json.dump(metadata, sys.stdout)
+
+    file.write_bytes(encrypted_content)
+
+    # logger.debug(encrypted_content)
+
+    logger.debug(f"File ending size {file.lstat().st_size}")
+
+def new_decrypt(password: bytes, files:typing.List[pathlib.Path],json_out:bool):
+    any_bad=False
+    validators={}
+    metadata={}
+    possible_files=[]
+    any_bad=False
+    for file in files:
+        metadata[file.name]=fencrypt_cli.get_metadata(file)
+        if not validate_password(password,file):
+            logger.error(f"Password did not match {file.name} No files will be decrypted")
+            any_bad=True
+        else:
+            validators[file.name] = metadata[file.name]['validator']
+            possible_files.append(file)
+    if json_out:
+        json.dump(validators,sys.stdout)
+    if any_bad:
+        exit(errno)
+    for file in possible_files:
+        meta_file = file.with_name(fencrypt_cli.METADATA_FILENAME.format(file_name=file.name))
+        master_key=generate_master_key(password,metadata[file.name]['salt'])
+        feistel_keys=generate_keys(master_key)
+        feistel = [bytes.fromhex(key) for key in feistel_keys['feistel']]
+        mac_key = bytes.fromhex(feistel_keys['mac'])
+        if feistel_keys['mac'] != metadata['mac']:
+            logger.error()
+        encrypted_content = file.read_bytes()
+        new_digest=hmac.new(key=mac_key,msg=encrypted_content,digestmod='sha256').digest()
+        logger.debug(new_digest)
+        logger.debug(mac_key)
+        logger.debug(hmac.compare_digest(new_digest, bytes.fromhex(metadata[file.name]['mac'])))
+
+        if hmac.compare_digest(new_digest, bytes.fromhex(metadata[file.name]['mac'])):
+            decrypted_content = feistel_all_rounds_decrypt(feistel, encrypted_content)
+            file.write_bytes(decrypted_content)
+            meta_file.unlink()
+        else:
+            logger.error(f"HMAC Validation Failed for {file.name}")
+
+
+
+def full_decyrpt_process(password, file: pathlib.Path, json_out: bool):
+    meta_file = file.with_name(fencrypt_cli.METADATA_FILENAME.format(file_name=file.name))
+    metadata = fencrypt_cli.get_metadata(file)
+    if password is None:
+        password = fencrypt_cli.get_password()
+
+    if validate_password(password,file):
+        master_key=generate_master_key(password,metadata['salt'])
+        feistel_keys=generate_keys(master_key)
+        feistel = [bytes.fromhex(key) for key in feistel_keys['feistel']]
+        mac_key = bytes.fromhex(feistel_keys['mac'])
+        encrypted_content = file.read_bytes()
+        new_digest=hmac.new(key=mac_key,msg=encrypted_content,digestmod='sha256').digest()
+        logger.debug(new_digest)
+        logger.debug(mac_key)
+        logger.debug(hmac.compare_digest(new_digest, bytes.fromhex(metadata['mac'])))
+        if hmac.compare_digest(new_digest, bytes.fromhex(metadata['mac'])):
+            decrypted_content = feistel_all_rounds_decrypt(feistel, encrypted_content)
+            file.write_bytes(decrypted_content)
+            meta_file.unlink()
+        else:
+            logger.error("HMAC Validation Failed")
+            print(f"HMAC Failed for {file.name}")
+    else:
+        logger.error("Password Validation Failed")
+        exit(errno.EINVAL)
+
+
+        # meta_file=pathlib.Path(f'.fenc-metadata.{file.name}')
+
+
+
+
+def new_encrypt(password:bytes, files: typing.List[pathlib.Path], json_out:bool):
+    master_keys={}
+    salts={}
+    for file in files:
+        salts[file.name]=secrets.token_bytes(16)
+        master_keys[file.name]=generate_master_key(password,salts[file.name])
+        logger.debug(f"Generated Master Key for {file.name}")
+    if json_out:
+        output={}
+        for key in master_keys.keys():
+            output[key]=master_keys[key].hex()
+        json.dump(output,sys.stdout)
+    starting_keys={}
+    mac_keys={}
+    feistel_keys={}
+    for file in files:
+        starting_keys = generate_keys(master_keys[file.name])
+        logger.debug(f"Generated Feistel Keys for {file.name}")
+        mac_keys[file.name] = bytes.fromhex(starting_keys['mac'])
+        feistel_keys[file.name] = [bytes.fromhex(key) for key in starting_keys['feistel']]
+        content = file.read_bytes()
+
+        # logger.debug(content.decode('utf8'))
+
+        try:
+            search_content = content.decode('utf-8', 'strict')
+            terms = parse_text_for_search_words(search_content)
+            tokens = tokenize_terms(terms)
+        except UnicodeDecodeError as ude:
+            terms = None
+            tokens = None
+        encrypted_content = feistel_all_rounds_encrypt(feistel_keys[file.name], content)
+
+        # encrypted_content = bytes.fromhex(encrypted_content)
+
+        if tokens is not None:
+
+            term_macs = [hmac.new(bytes.fromhex(starting_keys['search_terms']), token.encode('utf-8'), digestmod='sha256').digest().hex() for token in
+                         tokens]
+        else:
+            term_macs = []
+        metadata = create_metadata(file=file, salt=salts[file.name].hex(), validator=starting_keys['validator'],
+                                   terms=term_macs,
+                                   mac=hmac.new(mac_keys[file.name], encrypted_content, digestmod='sha256').digest().hex())
+        file.write_bytes(encrypted_content)
+
+def search(password:bytes, search_str:str, json_out):
+    matches=[]
+    validators = {}
+    metadata = {}
+    match_files=[]
+    for file in possible_files:
+        original_file_name=file.name.split('.fenc-meta.')[1]
+        metadata[original_file_name] = json.loads(file.read_text())
+        if not validate_password(password, pathlib.Path(original_file_name)):
+            logger.error(f"Password did not match {original_file_name}.")
+        else:
+            validators[original_file_name] = metadata[original_file_name]['validator']
+            match_files.append(file)
+    if json_out:
+        print(json.dumps(validators))
+    if len(match_files)<1:
+        logger.error("No Matches for Password.")
+        exit(errno.EINVAL)
+    search_token=tokenize_terms(search_str)
+    logger.debug(search_token)
+
+    for file in match_files:
+        original_file_name = file.name.split('.fenc-meta.')[1]
+        master_key = generate_master_key(password, metadata[original_file_name]['salt'])
+        feistel_keys = generate_keys(master_key)
+
+        maced_search_terms=[]
+        for token in search_token:
+            maced_search_terms.append(hmac.new(key=bytes.fromhex(feistel_keys['search_terms']),msg=token.encode('utf8'),digestmod='sha256').digest().hex())
+        # logger.debug(search_maced)
+        logger.debug(maced_search_terms)
+        file_terms=set(metadata[original_file_name]['terms'])
+        mac_search_set=set(maced_search_terms)
+        if not file_terms.isdisjoint(maced_search_terms):
+            # logger.debug(file_terms.intersection(mac_search_set))
+            print(original_file_name)
+        else:
+            logger.debug("No match")
+
+
+
+
+
+
+def create_metadata( file, salt, validator, mac, terms):
+
+    metadata_file=file.with_name(fencrypt_cli.METADATA_FILENAME.format(file_name=file.name))
+
+    metadata = {"salt": salt, "validator": validator, "mac": mac, "terms": terms}
+
+    metadata_file.write_text(json.dumps(metadata))
+
+    return metadata
+
+
+
+def component_test():
+
+    in_data = json.load(sys.stdin)
+
+    # in_data=json.load(open('example-input.json','r'))
+
+    out_data = {}
+
+
+    for key in in_data:
+
+
+        if key.lower() == "problem 1":
+
+
+            out_data[key] = generate_master_key(bytes(in_data[key]['password'],"utf8"),bytes.fromhex( in_data[key]['salt'])).hex()
+
+
+        elif key.lower() == "problem 2":
+
+
+            out_data[key] = generate_keys(bytes.fromhex(in_data[key]))
+
+
+        elif key.lower() == "problem 3":
+
+
+            out_data[key] = aes_ctr_round(bytes.fromhex(in_data[key]['key']), bytes.fromhex(in_data[key]['data'])).hex()
+
+
+        elif key.lower() == "problem 4":
+
+
+            out_data[key] = hmac_round(bytes.fromhex(in_data[key]['key']), bytes.fromhex(in_data[key]['data'])).hex()
+
+
+        elif key.lower() == "problem 5":
+
+            keys= [bytes.fromhex(key) for key in in_data[key]['keys']]
+
+            out_data[key] = feistel_all_rounds_encrypt( keys, bytes.fromhex(in_data[key]['plaintext'])).hex()
+
+        elif key.lower() == "problem 6":
+
+            keys = [bytes.fromhex(key) for key in in_data[key]['keys']]
+
+            out_data[key] = feistel_all_rounds_decrypt(keys, bytes.fromhex(in_data[key]['ciphertext'])).hex()
+
+
+        elif key.lower() == "problem 7":
+
+
+            out_data[key] = hmac.new(key=binascii.unhexlify(in_data[key]['key']),
+
+
+                                     msg=bytes.fromhex(in_data[key]['data']), digestmod='sha256').digest().hex()
+
+
+        elif key.lower() == "problem 8":
+
+
+            out_data[key] = parse_text_for_search_words(in_data[key])
+
+        elif key.lower() == "problem 9":
+
+
+            out_data[key] = parse_text_for_search_words(in_data[key])
+
+        elif key.lower() == "problem 10":
+
+
+            out_data[key] = tokenize_terms(parse_text_for_search_words(in_data[key]))
+
+        elif key.lower() == "problem 11":
+
+            out_data[key] = tokenize_terms(parse_text_for_search_words(in_data[key]))
+
+    json.dump(out_data,sys.stdout)
+
+    exit(0)
+
+
+
+if __name__ == "__main__":
+
+    # component_test()
+    args = fencrypt_cli.arg_setup()
+    logger.debug("got args")
+    logger.debug(args)
+
+    if args.encrypt:
+        password = bytes(fencrypt_cli.get_password(), "utf8")
+        new_encrypt(password,args.files,args.json_out)
+        # for file in args.files:
+        #         full_ecrypt_process(password, file,None, args.json_out)
+    else:
+        possible_files = sorted(pathlib.Path.cwd().rglob(pattern=".fenc-meta.*"))
+        if len(possible_files) < 1:
+            logger.error("No Encrypted files to search")
+            exit(errno.EINVAL)
+        password = bytes(fencrypt_cli.get_password(), "utf8")
+        if args.decrypt:
+            new_decrypt(password,args.files,args.json_out)
+        if args.search:
+            search(password, args.files, args.json_out)
+        # search_terms=[bytes(token,"utf8") for token in tokenize_terms(args.files)]
+
+

@@ -1,0 +1,41 @@
+{
+    "problem 1": {
+        "password": "e09f8ed71b715ec29d7c6c4db2efbf6a",
+        "salt": "e95af5ec95b703b9fdb119a565df5012"
+    },
+    "problem 2": "6908d3676fbc19db7c4487f0b3c36c9efefd3168b410e98f0dca8c4cf27f9b68",
+    "problem 3": {
+        "key": "0bb07b45bb44ce1254a50fa8f81e9706",
+        "data": "35b1c16d7ed655365da2c48611ffa0bfe173b3ca833a9d4cf2aefde7b8c583dd3490b508a5138b883528184d34121bb9d15b519c89555af566621353edde7212"
+    },
+    "problem 4": {
+        "key": "367fa89eb52235e852133bf4ad7464d6",
+        "data": "b892dc4550bf6f12cb972915b74c0c77a4de3c88cd77494cf1dd399fd00ec698e06f6632a1e51e3f735f02ea070c10540b8ded940e66f27e5195bb2867e5508c"
+    },
+    "problem 5": {
+        "keys": [
+            "bded14df20bcbff95ad53d36f1076bb4",
+            "e10c7fe143ecdc73589ec187dc43fc9d",
+            "fb6f0f9487466c806f9e85b2eb7f1b8d",
+            "e082d2d95823992874ba60b259c678f8"
+        ],
+        "plaintext": "11de356b0e1867ae1bed2ec0afd569ea830a716ff64548124f466ff9c72e6b8783e46f1217fbe0e057bedaf4fbf9ce7824e650711384198d7af6493acd8c759d"
+    },
+    "problem 6": {
+  "keys": [
+    "6ebc78045155ad5eb412e3f45b42e270",
+    "b8355ee3961e1bf498e877d66afbb9a1",
+    "3425ce40cbfc5b7767a3a5e3efc36072",
+    "9794c61df58c9b00c491b8a83cbd21ea"
+  ],
+  "ciphertext": "dbef4441512e336aa7790ba6a52d349dc775c131631f89614d7769d50ba8d4a018d9e672b0e7d225ea14b2c625e0fde7403d58bc4ef84fe73d007d55e3c379e6"
+},
+    "problem 7":{
+  "key": "bfff3ed5101115977e79be0d4a8d0f3b",
+  "data": "3e669d9db69fa81a464d9ffec1ac9c3cf5aeea47e4b92bcddf137e767f45ded0e6c8c66ab4eff14a0952dfa33160e09c4e289f04decdf0f8321b8931c47c84d4"
+},
+    "problem 8": "CsykTn_ \f^4dX&\f\u000b ^VJTQsosg9YPSnxY\u000b\f{CBw0bDArl$\n\r\f\fwG2BXVobeSs]  \f\r*j6DzKvg~\u000b\fuahmKzMORE\n\u000bEtOkQq\t\t\f\nxb> \u000b\n\f%F1h97\u000b\r\n'DmbixGXadsairl9DQ\r\r\r}XbpBYYheM\fVEdpX- \ttpkt\\\u000b\u000b\fuG\n \u000b",
+    "problem 9": "xl8u5iadsfG\f\r\u000b\n=8OYHayywdu\r\t<y\t\n9Wq71IzvaDd\nᝄw\t_AiudH\rXwb2R\r[TlK8M& \t\nyS4s=\t\f~yM󠄖\nTQc0ѸIѶd‿ⳇlS8\r \u000b|vLqxrNy+\r\t\r\tⳇW`\u000b\t \f-hCuJd7pwfpv* \t\f\f*B\\\u000b\n)NⰊAyiB𝪝ᾛkhtzmd_ $L5OdRgH2Eyyx\u000b\ff\u000b|FừZh꧴ \u000b\tWQV\ffuUETlO9DS\n\f *󠄾\r_Vg3MQ85YEds𝔈Kᾨ+\rmqԷoi\r\u000b\r*Vg\r\nRᾈ45zB\t\n\nWwxbgFjpRALbuGnBwvR\f\u000b\n2F᱁iA\u000b\fdb5+\r\u000b \u000bBUVDꙄ^\n\n\t\n!5𑄻\"\n\f\t\r=𑛁OXx𓇠v\u000bÐѸb[\n\fRn2sXH1XJkfe| \txGj2pw!\t\rῢC_\n \r3dOᾩEᐽD\u000b",
+    "problem 10":"&uCZGBPutUem\fsUB0bQioTLfJIPX/\f\f /NaRq5bWk&\u000b\n\nn,\t\n\t\tdnY01z4yvPuX8AWnPZka\r ?Wm0eIcQSVyv\r\u000b,BMPJa5'\r\n\n\rTknbf1KVCzKE`\f\r=a\nK0xcgF\n\n\r=9kxNYik}\u000b6ypx6il0Y.\t\u000b\u000b:m3{\r\u000b `BsG0TSfR*\n>ueeUN6iS\n",
+    "problem 11": "$cPDys79\t\r\\b*\u000b\r\n bAFsUS~ \t\t\tSUZ7iYDczrmdZ0j\r00OrMKR1Pc'\r\u000b\u000b Hrgriu5KhdᶻVR𝗳\r \fd4cMQOjc8YPD[\f\u000b\r\fugN00qY\n\n lHxCFxqwg,\t\u000b}idG1M9\u000b\\N9z\r \t\u000bhrnwH)\n |MQ71yjaGTjTOH4v\f \f\u000b\\SsAjwZJtSLoy\t7\f}TssGr7ZbdlaT_\t\nFZX2IzT^\f\t\r -;,<\u000b\f\r<8\f\n PwxSQnJxlrZjh\r/R6N2Vꓸ3u`\u000byozZ2uJyPJo9oK2qe\nI9RCuq| \n\nCjixLmcrzl5EMw\r\u000b_D3xCTvZ5KqY5N5pd+\n\tH󠄖Qot⁀r jQbⰊC)\f ]msꧏ〲໖KE4︳e51\u000b\n\r\fRaB! ~UIJqsTMcqblruhjHU\t\f\n\tsI7q〲K𝖊6ṁ\n\n\n 󠄖ⳇA1aD\n𖿠_\t  ;O0aBZEkzᵈm9O\u000bJ6C5\r,4W[\u000b\t\r "
+}
